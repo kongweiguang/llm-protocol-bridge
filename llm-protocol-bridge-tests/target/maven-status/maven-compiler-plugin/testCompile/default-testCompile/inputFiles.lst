@@ -1,0 +1,15 @@
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\route\ModelRouterTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\SdkCompatibilityTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\integration\LlmBridgeIntegrationTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\RequestDefaultsOverridesTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\UpstreamEndpointHeaderTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\integration\StreamingIntegrationTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\OpenAiChatCodecTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\RawExtraPreservationTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\OpenAiResponsesCodecTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\ToolCallConversionTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\ExtendedFieldsTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\route\RoutingStrategyTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\CrossProtocolConversionTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\json\JsonMergeTest.java
+C:\dev\java\xm\llm-protocol-bridge\llm-protocol-bridge-tests\src\test\java\io\github\kongweiguang\llmbridge\codec\AnthropicMessagesCodecTest.java

@@ -1,0 +1,15 @@
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$BridgeProperties.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$ProviderProperty.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$AuthenticationProperty.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeService.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeController.class
+META-INF\spring-configuration-metadata.json
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$StreamProperties.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAuthWebFilter.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$RouteProperty.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$ServerProperties.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$CompatibilityProperties.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$RouteCandidateProperty.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$ModelAliasProperty.class
+io\github\kongweiguang\llmbridge\autoconfigure\LlmBridgeAutoConfiguration$EndpointProperty.class

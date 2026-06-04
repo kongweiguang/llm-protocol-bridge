@@ -1,0 +1,9 @@
+{
+  "model": "mimo-chat",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant. Reply in Chinese."},
+    {"role": "user", "content": "用一句话介绍你自己。"}
+  ],
+  "max_tokens": 256,
+  "temperature": 0.7
+}

@@ -1,0 +1,5 @@
+{
+  "model": "mimo-chat",
+  "input": "用一句话介绍你自己。",
+  "max_output_tokens": 256
+}
