@@ -88,6 +88,10 @@ llm:
         strategy: failover
         candidates:
           - model-ref: gpt-main
+            weight: 40
           - model-ref: claude-main
+            weight: 30
           - model-ref: glm-chat
+            weight: 20
           - model-ref: mimo-chat
+            weight: 10

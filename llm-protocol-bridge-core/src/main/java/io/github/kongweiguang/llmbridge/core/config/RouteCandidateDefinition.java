@@ -10,4 +10,7 @@ public class RouteCandidateDefinition {
 
     /** Reference to a model-alias defined in llm.bridge.model-aliases. */
     private String modelRef;
+
+    /** Weight used by the weighted routing strategy. Default 1. */
+    private int weight = 1;
 }

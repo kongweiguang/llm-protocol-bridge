@@ -5,6 +5,7 @@ import io.github.kongweiguang.llmbridge.core.error.BridgeException;
 import io.github.kongweiguang.llmbridge.core.format.ProviderKind;
 import io.github.kongweiguang.llmbridge.core.routing.ModelResolutionResult;
 import io.github.kongweiguang.llmbridge.core.routing.ModelResolver;
+import io.github.kongweiguang.llmbridge.autoconfigure.LlmBridgeAutoConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -34,6 +35,10 @@ class RoutingStrategyTest {
     }
 
     private LlmBridgeProperties buildProps(String strategy, List<String> aliasNames) {
+        return buildProps(strategy, aliasNames, Map.of());
+    }
+
+    private LlmBridgeProperties buildProps(String strategy, List<String> aliasNames, Map<String, Integer> weights) {
         ProviderDefinition pd = createProvider();
 
         Map<String, ModelAliasDefinition> aliases = new java.util.LinkedHashMap<>();
@@ -42,7 +47,14 @@ class RoutingStrategyTest {
         }
 
         List<RouteCandidateDefinition> candidates = aliasNames.stream()
-                .map(name -> { RouteCandidateDefinition c = new RouteCandidateDefinition(); c.setModelRef(name); return c; })
+                .map(name -> {
+                    RouteCandidateDefinition c = new RouteCandidateDefinition();
+                    c.setModelRef(name);
+                    if (weights.containsKey(name)) {
+                        c.setWeight(weights.get(name));
+                    }
+                    return c;
+                })
                 .toList();
 
         RouteDefinition route = new RouteDefinition();
@@ -90,6 +102,78 @@ class RoutingStrategyTest {
         }
         // Both have equal weight, so distribution should be roughly 50/50
         assertThat(m1Count).isBetween(20, 80);
+    }
+
+    @Test
+    void weightedStrategy_usesCandidateWeights() {
+        ModelResolver resolver = new ModelResolver(buildProps(
+                "weighted",
+                List.of("m1", "m2"),
+                Map.of("m1", 1, "m2", 100)));
+
+        int m2Count = 0;
+        for (int i = 0; i < 100; i++) {
+            ModelResolutionResult result = resolver.resolve("group");
+            if (result.getFallbackCandidates().get(0).getName().equals("m2")) {
+                m2Count++;
+            }
+        }
+
+        assertThat(m2Count).isGreaterThan(85);
+    }
+
+    @Test
+    void springBoundProperties_preserveCandidateWeights() {
+        LlmBridgeAutoConfiguration.ProviderProperty provider =
+                new LlmBridgeAutoConfiguration.ProviderProperty();
+        provider.setKind(ProviderKind.OPENAI_CHAT_COMPATIBLE);
+
+        LlmBridgeAutoConfiguration.EndpointProperty endpoint =
+                new LlmBridgeAutoConfiguration.EndpointProperty();
+        endpoint.setBaseUrl("https://example.com/v1");
+        provider.setEndpoint(endpoint);
+
+        LlmBridgeAutoConfiguration.AuthenticationProperty authentication =
+                new LlmBridgeAutoConfiguration.AuthenticationProperty();
+        authentication.setToken("test-key");
+        provider.setAuthentication(authentication);
+
+        LlmBridgeAutoConfiguration.ModelAliasProperty m1 =
+                new LlmBridgeAutoConfiguration.ModelAliasProperty();
+        m1.setProviderRef("test-provider");
+        m1.setUpstreamModel("model-m1");
+
+        LlmBridgeAutoConfiguration.ModelAliasProperty m2 =
+                new LlmBridgeAutoConfiguration.ModelAliasProperty();
+        m2.setProviderRef("test-provider");
+        m2.setUpstreamModel("model-m2");
+
+        LlmBridgeAutoConfiguration.RouteCandidateProperty c1 =
+                new LlmBridgeAutoConfiguration.RouteCandidateProperty();
+        c1.setModelRef("m1");
+        c1.setWeight(3);
+
+        LlmBridgeAutoConfiguration.RouteCandidateProperty c2 =
+                new LlmBridgeAutoConfiguration.RouteCandidateProperty();
+        c2.setModelRef("m2");
+        c2.setWeight(7);
+
+        LlmBridgeAutoConfiguration.RouteProperty route =
+                new LlmBridgeAutoConfiguration.RouteProperty();
+        route.setStrategy("weighted");
+        route.setCandidates(List.of(c1, c2));
+
+        LlmBridgeAutoConfiguration.BridgeProperties springProps =
+                new LlmBridgeAutoConfiguration.BridgeProperties();
+        springProps.setProviders(Map.of("test-provider", provider));
+        springProps.setModelAliases(Map.of("m1", m1, "m2", m2));
+        springProps.setRoutes(Map.of("group", route));
+
+        LlmBridgeProperties props = springProps.toLlmBridgeProperties();
+
+        assertThat(props.getRoutes().get("group").getCandidates())
+                .extracting(RouteCandidateDefinition::getWeight)
+                .containsExactly(3, 7);
     }
 
     @Test

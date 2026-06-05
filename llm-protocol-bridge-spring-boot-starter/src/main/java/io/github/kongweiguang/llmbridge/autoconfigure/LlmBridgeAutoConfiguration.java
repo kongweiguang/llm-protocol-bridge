@@ -201,6 +201,7 @@ public class LlmBridgeAutoConfiguration {
                 for (RouteCandidateProperty cp : r.getCandidates()) {
                     RouteCandidateDefinition cd = new RouteCandidateDefinition();
                     cd.setModelRef(cp.getModelRef());
+                    cd.setWeight(cp.getWeight());
                     candidates.add(cd);
                 }
                 rd.setCandidates(candidates);
@@ -280,5 +281,6 @@ public class LlmBridgeAutoConfiguration {
     @Data
     public static class RouteCandidateProperty {
         private String modelRef;
+        private int weight = 1;
     }
 }

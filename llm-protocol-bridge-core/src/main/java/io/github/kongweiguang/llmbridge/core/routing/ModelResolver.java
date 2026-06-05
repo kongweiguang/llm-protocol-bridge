@@ -57,7 +57,9 @@ public class ModelResolver {
                             "Route '" + requestedModel + "' references unknown model-alias: "
                                     + candidate.getModelRef());
                 }
-                candidates.add(resolveAlias(candidate.getModelRef(), candidateAlias));
+                ModelConfig candidateConfig = resolveAlias(candidate.getModelRef(), candidateAlias);
+                candidateConfig.setWeight(candidate.getWeight());
+                candidates.add(candidateConfig);
             }
 
             RoutingStrategy strategy = RoutingStrategy.parse(route.getStrategy());

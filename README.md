@@ -406,8 +406,11 @@ llm:
         strategy: failover
         candidates:
           - model-ref: gpt-main
+            weight: 70
           - model-ref: claude-main
+            weight: 20
           - model-ref: deepseek-chat
+            weight: 10
 ```
 
 | 字段 | 类型 | 说明 |
@@ -415,6 +418,7 @@ llm:
 | `strategy` | Enum | 路由策略，见下表。 |
 | `candidates` | List | 候选模型列表，每项引用一个 `model-alias`。 |
 | `candidates[].model-ref` | String | 引用的 model-alias 名称。 |
+| `candidates[].weight` | Integer | 可选，`weighted` 策略使用的权重，默认 1。 |
 | `request-defaults` | Map | 可选，route 级别的默认请求参数（当前版本暂未在解析链路中生效，保留字段供后续扩展）。 |
 | `request-overrides` | Map | 可选，route 级别的强制覆盖参数（当前版本暂未在解析链路中生效，保留字段供后续扩展）。 |
 
@@ -424,7 +428,7 @@ llm:
 |---|---|---|
 | `failover` | 按 candidates 顺序逐个尝试，当前一个失败时自动切换到下一个 | **高可用保障**：GPT-4o 挂了自动切到 Claude，再挂切到 DeepSeek |
 | `priority` | 始终优先使用第一个可用模型，不尝试后续模型 | **成本优先**：优先使用便宜的 DeepSeek，只有不可用时才用 GPT |
-| `weighted` | 按每个候选模型的 `weight` 值进行加权随机选择（当前候选默认权重均为 1） | **A/B 测试 / 成本控制**：配合不同 model-alias 的权重配置控制流量比例 |
+| `weighted` | 按 `candidates[].weight` 进行加权随机选择，未配置时默认权重为 1 | **A/B 测试 / 成本控制**：配合不同候选模型的权重配置控制流量比例 |
 | `round-robin` | 按顺序轮流使用每个候选模型 | **负载均衡**：均匀分配请求，避免单个 provider 过载 |
 
 **业务场景**：
