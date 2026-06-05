@@ -485,7 +485,7 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
         }
 
         if (request.getToolChoice() != null && request.getToolChoice().getValue() != null) {
-            root.set("tool_choice", request.getToolChoice().getValue());
+            root.set("tool_choice", mapToolChoiceToOpenAi(request.getToolChoice().getValue()));
         }
 
         // Merge rawExtra back
@@ -494,6 +494,30 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
         }
 
         return root;
+    }
+
+    private JsonNode mapToolChoiceToOpenAi(JsonNode toolChoice) {
+        if (toolChoice == null || !toolChoice.isObject()) {
+            return toolChoice;
+        }
+        String type = JacksonUtil.getString(toolChoice, "type");
+        if ("tool".equals(type)) {
+            ObjectNode mapped = JacksonUtil.objectNode();
+            mapped.put("type", "function");
+            ObjectNode function = mapped.putObject("function");
+            String name = JacksonUtil.getString(toolChoice, "name");
+            if (name != null) {
+                function.put("name", name);
+            }
+            return mapped;
+        }
+        if ("any".equals(type)) {
+            return com.fasterxml.jackson.databind.node.TextNode.valueOf("required");
+        }
+        if ("auto".equals(type) || "none".equals(type)) {
+            return com.fasterxml.jackson.databind.node.TextNode.valueOf(type);
+        }
+        return toolChoice;
     }
 
     private ObjectNode denormalizeToMessageItem(CanonicalMessage msg) {

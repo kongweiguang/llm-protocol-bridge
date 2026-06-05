@@ -2,6 +2,7 @@ package io.github.kongweiguang.llmbridge.codec;
 
 import io.github.kongweiguang.llmbridge.core.codec.ProtocolCodec;
 import io.github.kongweiguang.llmbridge.core.codec.ProtocolCodecRegistry;
+import io.github.kongweiguang.llmbridge.core.canonical.CanonicalRole;
 import io.github.kongweiguang.llmbridge.core.format.ApiProtocol;
 import io.github.kongweiguang.llmbridge.core.canonical.CanonicalRequest;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -217,12 +218,11 @@ class SdkCompatibilityTest {
         CanonicalRequest normalized = codec.normalizeRequest(request, ctx);
 
         assertThat(normalized.getMessages()).hasSize(3);
-        // Anthropic codec puts tool_use in content as ToolCallContentPart
-        assertThat(normalized.getMessages().get(1).getContent()).isNotNull();
-        boolean hasToolCall = normalized.getMessages().get(1).getContent().stream()
-                .anyMatch(p -> p instanceof io.github.kongweiguang.llmbridge.core.canonical.ToolCallContentPart tcp
-                        && "toolu_123".equals(tcp.getId()));
-        assertThat(hasToolCall).isTrue();
+        assertThat(normalized.getMessages().get(1).getToolCalls()).hasSize(1);
+        assertThat(normalized.getMessages().get(1).getToolCalls().get(0).getId()).isEqualTo("toolu_123");
+        assertThat(normalized.getMessages().get(1).getToolCalls().get(0).getName()).isEqualTo("get_weather");
+        assertThat(normalized.getMessages().get(2).getRole()).isEqualTo(CanonicalRole.TOOL);
+        assertThat(normalized.getMessages().get(2).getToolCallId()).isEqualTo("toolu_123");
         assertThat(normalized.getTools()).hasSize(1);
         assertThat(normalized.getTools().get(0).getName()).isEqualTo("get_weather");
     }

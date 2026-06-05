@@ -296,4 +296,120 @@ class ToolCallConversionTest {
         assertThat(denormalizedTcs.get(0).get("function").get("name").asText()).isEqualTo("get_weather");
         assertThat(denormalizedTcs.get(1).get("function").get("name").asText()).isEqualTo("get_time");
     }
+
+    @Test
+    void openAiChatParallelToolCalls_preservedWhenConvertingToResponses() {
+        ObjectNode request = JacksonUtil.objectNode();
+        request.put("model", "gpt-4");
+        request.put("parallel_tool_calls", false);
+        request.putArray("messages").addObject()
+                .put("role", "user")
+                .put("content", "Use one tool at a time.");
+
+        ProtocolCodec sourceCodec = registry.get(ApiProtocol.OPENAI_CHAT_COMPLETIONS);
+        ProtocolCodec targetCodec = registry.get(ApiProtocol.OPENAI_RESPONSES);
+        ProtocolCodec.BridgeContext context = new ProtocolCodec.BridgeContext(
+                ApiProtocol.OPENAI_CHAT_COMPLETIONS, ApiProtocol.OPENAI_RESPONSES, "gpt-4");
+
+        CanonicalRequest normalized = sourceCodec.normalizeRequest(request, context);
+        ObjectNode responsesRequest = targetCodec.denormalizeRequest(normalized, context);
+
+        assertThat(normalized.getParallelToolCalls()).isFalse();
+        assertThat(responsesRequest.get("parallel_tool_calls").asBoolean()).isFalse();
+    }
+
+    @Test
+    void anthropicRequestToolUseAndResult_toOpenAiChatToolCallsAndToolMessage() {
+        ObjectNode request = JacksonUtil.objectNode();
+        request.put("model", "claude-sonnet-4-6");
+        request.put("max_tokens", 100);
+
+        var messages = request.putArray("messages");
+        var assistantMsg = messages.addObject();
+        assistantMsg.put("role", "assistant");
+        var assistantContent = assistantMsg.putArray("content");
+        assistantContent.addObject()
+                .put("type", "text")
+                .put("text", "I'll check.");
+        var toolUse = assistantContent.addObject();
+        toolUse.put("type", "tool_use");
+        toolUse.put("id", "toolu_123");
+        toolUse.put("name", "get_weather");
+        toolUse.putObject("input").put("location", "NYC");
+
+        var userMsg = messages.addObject();
+        userMsg.put("role", "user");
+        var userContent = userMsg.putArray("content");
+        var toolResult = userContent.addObject();
+        toolResult.put("type", "tool_result");
+        toolResult.put("tool_use_id", "toolu_123");
+        toolResult.put("content", "Sunny");
+        toolResult.put("is_error", true);
+
+        ProtocolCodec sourceCodec = registry.get(ApiProtocol.ANTHROPIC_MESSAGES);
+        ProtocolCodec targetCodec = registry.get(ApiProtocol.OPENAI_CHAT_COMPLETIONS);
+        ProtocolCodec.BridgeContext context = new ProtocolCodec.BridgeContext(
+                ApiProtocol.ANTHROPIC_MESSAGES, ApiProtocol.OPENAI_CHAT_COMPLETIONS, "claude-sonnet-4-6");
+
+        CanonicalRequest normalized = sourceCodec.normalizeRequest(request, context);
+        ObjectNode chatRequest = targetCodec.denormalizeRequest(normalized, context);
+
+        JsonNode chatMessages = chatRequest.get("messages");
+        assertThat(chatMessages).hasSize(2);
+
+        JsonNode assistant = chatMessages.get(0);
+        assertThat(assistant.get("role").asText()).isEqualTo("assistant");
+        assertThat(assistant.get("content").asText()).isEqualTo("I'll check.");
+        assertThat(assistant.get("tool_calls")).hasSize(1);
+        assertThat(assistant.get("tool_calls").get(0).get("id").asText()).isEqualTo("toolu_123");
+        assertThat(assistant.get("tool_calls").get(0).get("function").get("name").asText()).isEqualTo("get_weather");
+        assertThat(assistant.get("tool_calls").get(0).get("function").get("arguments").asText())
+                .isEqualTo("{\"location\":\"NYC\"}");
+
+        JsonNode tool = chatMessages.get(1);
+        assertThat(tool.get("role").asText()).isEqualTo("tool");
+        assertThat(tool.get("tool_call_id").asText()).isEqualTo("toolu_123");
+        assertThat(tool.get("content").asText()).isEqualTo("Sunny");
+    }
+
+    @Test
+    void structuredToolChoice_mapsBetweenOpenAiAndAnthropicShapes() {
+        ObjectNode request = JacksonUtil.objectNode();
+        request.put("model", "gpt-4");
+        request.putArray("messages").addObject()
+                .put("role", "user")
+                .put("content", "Call get_weather.");
+        var toolChoice = request.putObject("tool_choice");
+        toolChoice.put("type", "function");
+        toolChoice.putObject("function").put("name", "get_weather");
+
+        ProtocolCodec chatCodec = registry.get(ApiProtocol.OPENAI_CHAT_COMPLETIONS);
+        ProtocolCodec anthropicCodec = registry.get(ApiProtocol.ANTHROPIC_MESSAGES);
+        ProtocolCodec.BridgeContext toAnthropic = new ProtocolCodec.BridgeContext(
+                ApiProtocol.OPENAI_CHAT_COMPLETIONS, ApiProtocol.ANTHROPIC_MESSAGES, "gpt-4");
+
+        CanonicalRequest normalized = chatCodec.normalizeRequest(request, toAnthropic);
+        ObjectNode anthropicRequest = anthropicCodec.denormalizeRequest(normalized, toAnthropic);
+
+        assertThat(anthropicRequest.get("tool_choice").get("type").asText()).isEqualTo("tool");
+        assertThat(anthropicRequest.get("tool_choice").get("name").asText()).isEqualTo("get_weather");
+
+        ObjectNode anthropicSource = JacksonUtil.objectNode();
+        anthropicSource.put("model", "claude-sonnet-4-6");
+        anthropicSource.put("max_tokens", 100);
+        anthropicSource.putArray("messages").addObject()
+                .put("role", "user")
+                .put("content", "Call get_weather.");
+        var anthropicToolChoice = anthropicSource.putObject("tool_choice");
+        anthropicToolChoice.put("type", "tool");
+        anthropicToolChoice.put("name", "get_weather");
+
+        ProtocolCodec.BridgeContext toChat = new ProtocolCodec.BridgeContext(
+                ApiProtocol.ANTHROPIC_MESSAGES, ApiProtocol.OPENAI_CHAT_COMPLETIONS, "claude-sonnet-4-6");
+        CanonicalRequest normalizedAnthropic = anthropicCodec.normalizeRequest(anthropicSource, toChat);
+        ObjectNode chatRequest = chatCodec.denormalizeRequest(normalizedAnthropic, toChat);
+
+        assertThat(chatRequest.get("tool_choice").get("type").asText()).isEqualTo("function");
+        assertThat(chatRequest.get("tool_choice").get("function").get("name").asText()).isEqualTo("get_weather");
+    }
 }

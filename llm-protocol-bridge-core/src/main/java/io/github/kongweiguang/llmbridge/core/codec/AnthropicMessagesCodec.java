@@ -169,21 +169,62 @@ public class AnthropicMessagesCodec implements ProtocolCodec {
         JsonNode contentNode = msg.get("content");
         if (contentNode != null) {
             List<CanonicalContentPart> parts = new ArrayList<>();
+            List<CanonicalToolCall> toolCalls = new ArrayList<>();
+            List<ToolResultContentPart> toolResults = new ArrayList<>();
             if (contentNode.isTextual()) {
                 parts.add(new TextContentPart(contentNode.asText()));
             } else if (contentNode.isArray()) {
                 for (JsonNode block : contentNode) {
                     CanonicalContentPart ncp = normalizeContentBlock(block);
                     if (ncp != null) {
-                        parts.add(ncp);
+                        if (ncp instanceof ToolCallContentPart tcp) {
+                            CanonicalToolCall tc = new CanonicalToolCall();
+                            tc.setId(tcp.getId());
+                            tc.setName(tcp.getName());
+                            tc.setType("function");
+                            tc.setArguments(tcp.getArguments());
+                            if (tcp.getArguments() != null) {
+                                tc.setRawArguments(tcp.getArguments().toString());
+                            }
+                            tc.setIndex(toolCalls.size());
+                            toolCalls.add(tc);
+                        } else if (ncp instanceof ToolResultContentPart trp) {
+                            toolResults.add(trp);
+                        } else {
+                            parts.add(ncp);
+                        }
                     }
                 }
+            }
+            if (!toolCalls.isEmpty()) {
+                nm.setToolCalls(toolCalls);
+            }
+            if (!toolResults.isEmpty() && parts.isEmpty() && nm.getRole() == CanonicalRole.USER) {
+                ToolResultContentPart trp = toolResults.get(0);
+                nm.setRole(CanonicalRole.TOOL);
+                nm.setToolCallId(trp.getToolCallId());
+                if (trp.getContent() != null) {
+                    parts.add(new TextContentPart(trp.getContent()));
+                }
+                if (trp.getIsError() != null) {
+                    ObjectNode extra = JacksonUtil.objectNode();
+                    extra.put("is_error", trp.getIsError());
+                    nm.setRawExtra(extra);
+                }
+            } else {
+                parts.addAll(toolResults);
             }
             nm.setContent(parts);
         }
 
         // Preserve unknown message fields
-        nm.setRawExtra(JacksonUtil.extractExtra((ObjectNode) msg, "role", "content"));
+        ObjectNode messageExtra = JacksonUtil.extractExtra((ObjectNode) msg, "role", "content");
+        if (!messageExtra.isEmpty()) {
+            if (nm.getRawExtra() != null) {
+                messageExtra.setAll(nm.getRawExtra());
+            }
+            nm.setRawExtra(messageExtra);
+        }
 
         return nm;
     }
@@ -453,7 +494,7 @@ public class AnthropicMessagesCodec implements ProtocolCodec {
                 }
                 root.set("tool_choice", tcNode);
             } else if (tcValue.isObject()) {
-                root.set("tool_choice", tcValue);
+                root.set("tool_choice", mapToolChoiceToAnthropic(tcValue));
             }
         }
 
@@ -463,6 +504,24 @@ public class AnthropicMessagesCodec implements ProtocolCodec {
         }
 
         return root;
+    }
+
+    private JsonNode mapToolChoiceToAnthropic(JsonNode toolChoice) {
+        if (toolChoice == null || !toolChoice.isObject()) {
+            return toolChoice;
+        }
+        String type = JacksonUtil.getString(toolChoice, "type");
+        if ("function".equals(type)) {
+            JsonNode function = toolChoice.get("function");
+            String name = function != null ? JacksonUtil.getString(function, "name") : null;
+            ObjectNode mapped = JacksonUtil.objectNode();
+            mapped.put("type", "tool");
+            if (name != null) {
+                mapped.put("name", name);
+            }
+            return mapped;
+        }
+        return toolChoice;
     }
 
     private ObjectNode denormalizeMessage(CanonicalMessage msg) {
