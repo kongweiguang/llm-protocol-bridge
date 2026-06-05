@@ -1022,6 +1022,7 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
     @Override
     public Flux<SseFrame> denormalizeStream(Flux<CanonicalStreamEvent> events, BridgeContext context) {
         StreamStateTracker state = new StreamStateTracker();
+        Map<Integer, String> toolItemIds = new HashMap<>();
         state.setCreated(System.currentTimeMillis() / 1000);
         state.setModel(context.requestedModel());
         state.setResponseId("resp_" + UUID.randomUUID());
@@ -1083,11 +1084,14 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
                     result.add(new SseFrame("response.refusal.delta", root.toString()));
                 }
                 case TOOL_CALL_START -> {
+                    int outputIndex = event.getToolIndex() != null ? event.getToolIndex() : 0;
+                    String itemId = "fc_" + UUID.randomUUID();
+                    toolItemIds.put(outputIndex, itemId);
                     ObjectNode root = JacksonUtil.objectNode();
                     root.put("type", "response.output_item.added");
-                    root.put("output_index", event.getToolIndex() != null ? event.getToolIndex() : 0);
+                    root.put("output_index", outputIndex);
                     ObjectNode item = root.putObject("item");
-                    item.put("id", "fc_" + UUID.randomUUID());
+                    item.put("id", itemId);
                     item.put("type", "function_call");
                     item.put("status", "in_progress");
                     item.put("call_id", event.getToolCallId() != null ? event.getToolCallId() : "call_" + UUID.randomUUID());
@@ -1096,18 +1100,20 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
                     result.add(new SseFrame("response.output_item.added", root.toString()));
                 }
                 case TOOL_ARGUMENTS_DELTA -> {
+                    int outputIndex = event.getToolIndex() != null ? event.getToolIndex() : 0;
                     ObjectNode root = JacksonUtil.objectNode();
                     root.put("type", "response.function_call_arguments.delta");
-                    root.put("item_id", "fc_" + UUID.randomUUID());
-                    root.put("output_index", event.getToolIndex() != null ? event.getToolIndex() : 0);
+                    root.put("item_id", toolItemIds.computeIfAbsent(outputIndex, ignored -> "fc_" + UUID.randomUUID()));
+                    root.put("output_index", outputIndex);
                     root.put("delta", event.getToolArgumentsDelta() != null ? event.getToolArgumentsDelta() : "");
                     result.add(new SseFrame("response.function_call_arguments.delta", root.toString()));
                 }
                 case TOOL_CALL_DONE -> {
+                    int outputIndex = event.getToolIndex() != null ? event.getToolIndex() : 0;
                     ObjectNode root = JacksonUtil.objectNode();
                     root.put("type", "response.function_call_arguments.done");
-                    root.put("item_id", "fc_" + UUID.randomUUID());
-                    root.put("output_index", event.getToolIndex() != null ? event.getToolIndex() : 0);
+                    root.put("item_id", toolItemIds.computeIfAbsent(outputIndex, ignored -> "fc_" + UUID.randomUUID()));
+                    root.put("output_index", outputIndex);
                     result.add(new SseFrame("response.function_call_arguments.done", root.toString()));
                 }
                 case MESSAGE_DELTA -> {

@@ -249,6 +249,50 @@ class ToolCallConversionTest {
     }
 
     @Test
+    void streamToolCall_toResponses_reusesFunctionCallItemIdForArgumentEvents() {
+        Flux<CanonicalStreamEvent> events = Flux.just(
+                new CanonicalStreamEvent(CanonicalStreamEventType.TOOL_CALL_START) {{
+                    setToolCallId("call_123");
+                    setToolName("get_weather");
+                    setToolIndex(0);
+                }},
+                new CanonicalStreamEvent(CanonicalStreamEventType.TOOL_ARGUMENTS_DELTA) {{
+                    setToolArgumentsDelta("{\"location\":\"NYC\"}");
+                    setToolIndex(0);
+                }},
+                new CanonicalStreamEvent(CanonicalStreamEventType.TOOL_CALL_DONE) {{
+                    setToolIndex(0);
+                }}
+        );
+
+        ProtocolCodec codec = registry.get(ApiProtocol.OPENAI_RESPONSES);
+        ProtocolCodec.BridgeContext context = new ProtocolCodec.BridgeContext(
+                ApiProtocol.OPENAI_CHAT_COMPLETIONS, ApiProtocol.OPENAI_RESPONSES, "gpt-4");
+
+        StepVerifier.create(codec.denormalizeStream(events, context).collectList())
+                .assertNext(eventList -> {
+                    SseFrame start = eventList.stream()
+                            .filter(e -> "response.output_item.added".equals(e.getEvent()))
+                            .findFirst().orElse(null);
+                    SseFrame delta = eventList.stream()
+                            .filter(e -> "response.function_call_arguments.delta".equals(e.getEvent()))
+                            .findFirst().orElse(null);
+                    SseFrame done = eventList.stream()
+                            .filter(e -> "response.function_call_arguments.done".equals(e.getEvent()))
+                            .findFirst().orElse(null);
+
+                    assertThat(start).isNotNull();
+                    assertThat(delta).isNotNull();
+                    assertThat(done).isNotNull();
+
+                    String itemId = JacksonUtil.tryParse(start.getData()).get("item").get("id").asText();
+                    assertThat(JacksonUtil.tryParse(delta.getData()).get("item_id").asText()).isEqualTo(itemId);
+                    assertThat(JacksonUtil.tryParse(done.getData()).get("item_id").asText()).isEqualTo(itemId);
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void openAiChatStreamMultipleToolCallsInOneDelta_preservesAllToolCallStarts() {
         ObjectNode chunk = JacksonUtil.objectNode();
         chunk.put("id", "chatcmpl-123");
