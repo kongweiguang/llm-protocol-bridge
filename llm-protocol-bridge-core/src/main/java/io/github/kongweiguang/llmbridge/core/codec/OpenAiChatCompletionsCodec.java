@@ -935,89 +935,27 @@ public class OpenAiChatCompletionsCodec implements ProtocolCodec {
     @Override
     public Flux<CanonicalStreamEvent> normalizeStream(Flux<SseFrame> rawEvents, BridgeContext context) {
         return rawEvents.filter(event -> !event.isComment())
-                .handle((event, sink) -> {
+                .concatMapIterable(event -> {
                     if (event.isDone()) {
-                        sink.next(new CanonicalStreamEvent(CanonicalStreamEventType.DONE));
-                        return;
+                        return List.of(new CanonicalStreamEvent(CanonicalStreamEventType.DONE));
                     }
-                    CanonicalStreamEvent result = normalizeStreamEvent(event);
-                    if (result != null) {
-                        sink.next(result);
-                    }
+                    return normalizeStreamEvents(event);
                 });
     }
 
-    private CanonicalStreamEvent normalizeStreamEvent(SseFrame event) {
+    private List<CanonicalStreamEvent> normalizeStreamEvents(SseFrame event) {
         JsonNode data = JacksonUtil.tryParse(event.getData());
         if (data == null) {
-            return null;
+            return List.of();
         }
 
-        CanonicalStreamEvent nse = new CanonicalStreamEvent();
-        nse.setRaw(data);
-
+        List<CanonicalStreamEvent> events = new ArrayList<>();
         String id = JacksonUtil.getString(data, "id");
-        if (id != null) nse.setResponseId(id);
 
         JsonNode choices = data.get("choices");
         if (choices != null && choices.isArray() && !choices.isEmpty()) {
-            JsonNode choice = choices.get(0);
-            Integer index = JacksonUtil.getInt(choice, "index");
-            if (index != null) nse.setChoiceIndex(index);
-
-            JsonNode delta = choice.get("delta");
-            if (delta != null) {
-                // Role delta -> MESSAGE_START
-                String role = JacksonUtil.getString(delta, "role");
-                if (role != null) {
-                    nse.setType(CanonicalStreamEventType.MESSAGE_START);
-                    nse.setRole(mapRole(role));
-                }
-
-                // Content delta -> TEXT_DELTA
-                String content = JacksonUtil.getString(delta, "content");
-                if (content != null) {
-                    nse.setType(CanonicalStreamEventType.TEXT_DELTA);
-                    nse.setDeltaText(content);
-                }
-
-                // Refusal delta
-                String refusal = JacksonUtil.getString(delta, "refusal");
-                if (refusal != null) {
-                    nse.setType(CanonicalStreamEventType.REFUSAL_DELTA);
-                    nse.setRefusalDelta(refusal);
-                }
-
-                // Tool calls delta
-                JsonNode toolCalls = delta.get("tool_calls");
-                if (toolCalls != null && toolCalls.isArray()) {
-                    JsonNode tc = toolCalls.get(0);
-                    if (tc != null) {
-                        Integer tcIndex = JacksonUtil.getInt(tc, "index");
-                        if (tcIndex != null) nse.setToolIndex(tcIndex);
-
-                        String tcId = JacksonUtil.getString(tc, "id");
-                        JsonNode func = tc.get("function");
-                        String funcName = func != null ? JacksonUtil.getString(func, "name") : null;
-                        String funcArgs = func != null ? JacksonUtil.getString(func, "arguments") : null;
-
-                        if (tcId != null || funcName != null) {
-                            nse.setType(CanonicalStreamEventType.TOOL_CALL_START);
-                            nse.setToolCallId(tcId);
-                            nse.setToolName(funcName);
-                        } else if (funcArgs != null) {
-                            nse.setType(CanonicalStreamEventType.TOOL_ARGUMENTS_DELTA);
-                            nse.setToolArgumentsDelta(funcArgs);
-                        }
-                    }
-                }
-            }
-
-            // Finish reason
-            String finishReason = JacksonUtil.getString(choice, "finish_reason");
-            if (finishReason != null) {
-                nse.setType(CanonicalStreamEventType.MESSAGE_DELTA);
-                nse.setStopReason(StopReasonMapper.toNormalizedFromOpenAi(finishReason));
+            for (JsonNode choice : choices) {
+                appendChoiceStreamEvents(events, data, id, choice);
             }
         }
 
@@ -1032,14 +970,108 @@ public class OpenAiChatCompletionsCodec implements ProtocolCodec {
                 nu.setTotalTokens(nu.getInputTokens() + nu.getOutputTokens());
             }
             if (hasUsage(nu)) {
-                nse.setUsage(nu);
-                if (nse.getType() == null) {
-                    nse.setType(CanonicalStreamEventType.USAGE_DELTA);
+                if (events.isEmpty()) {
+                    CanonicalStreamEvent usageEvent = baseStreamEvent(data, id, null);
+                    usageEvent.setType(CanonicalStreamEventType.USAGE_DELTA);
+                    usageEvent.setUsage(nu);
+                    events.add(usageEvent);
+                } else {
+                    events.get(events.size() - 1).setUsage(nu);
                 }
             }
         }
 
-        return nse.getType() != null ? nse : null;
+        return events;
+    }
+
+    private void appendChoiceStreamEvents(List<CanonicalStreamEvent> events, JsonNode data, String responseId, JsonNode choice) {
+        Integer index = JacksonUtil.getInt(choice, "index");
+        JsonNode delta = choice.get("delta");
+        if (delta != null) {
+            // Role delta -> MESSAGE_START
+            String role = JacksonUtil.getString(delta, "role");
+            if (role != null) {
+                CanonicalStreamEvent nse = baseStreamEvent(data, responseId, index);
+                nse.setType(CanonicalStreamEventType.MESSAGE_START);
+                nse.setRole(mapRole(role));
+                events.add(nse);
+            }
+
+            // Content delta -> TEXT_DELTA
+            String content = JacksonUtil.getString(delta, "content");
+            if (content != null) {
+                CanonicalStreamEvent nse = baseStreamEvent(data, responseId, index);
+                nse.setType(CanonicalStreamEventType.TEXT_DELTA);
+                nse.setDeltaText(content);
+                events.add(nse);
+            }
+
+            // Refusal delta
+            String refusal = JacksonUtil.getString(delta, "refusal");
+            if (refusal != null) {
+                CanonicalStreamEvent nse = baseStreamEvent(data, responseId, index);
+                nse.setType(CanonicalStreamEventType.REFUSAL_DELTA);
+                nse.setRefusalDelta(refusal);
+                events.add(nse);
+            }
+
+            // Tool calls delta
+            JsonNode toolCalls = delta.get("tool_calls");
+            if (toolCalls != null && toolCalls.isArray()) {
+                for (JsonNode tc : toolCalls) {
+                    if (tc != null) {
+                        appendToolCallStreamEvent(events, data, responseId, index, tc);
+                    }
+                }
+            }
+        }
+
+        // Finish reason
+        String finishReason = JacksonUtil.getString(choice, "finish_reason");
+        if (finishReason != null) {
+            CanonicalStreamEvent nse = baseStreamEvent(data, responseId, index);
+            nse.setType(CanonicalStreamEventType.MESSAGE_DELTA);
+            nse.setStopReason(StopReasonMapper.toNormalizedFromOpenAi(finishReason));
+            events.add(nse);
+        }
+    }
+
+    private void appendToolCallStreamEvent(
+            List<CanonicalStreamEvent> events,
+            JsonNode data,
+            String responseId,
+            Integer choiceIndex,
+            JsonNode tc) {
+        Integer tcIndex = JacksonUtil.getInt(tc, "index");
+
+        String tcId = JacksonUtil.getString(tc, "id");
+        JsonNode func = tc.get("function");
+        String funcName = func != null ? JacksonUtil.getString(func, "name") : null;
+        String funcArgs = func != null ? JacksonUtil.getString(func, "arguments") : null;
+
+        if (tcId != null || funcName != null) {
+            CanonicalStreamEvent nse = baseStreamEvent(data, responseId, choiceIndex);
+            nse.setType(CanonicalStreamEventType.TOOL_CALL_START);
+            if (tcIndex != null) nse.setToolIndex(tcIndex);
+            nse.setToolCallId(tcId);
+            nse.setToolName(funcName);
+            events.add(nse);
+        }
+        if (funcArgs != null) {
+            CanonicalStreamEvent nse = baseStreamEvent(data, responseId, choiceIndex);
+            nse.setType(CanonicalStreamEventType.TOOL_ARGUMENTS_DELTA);
+            if (tcIndex != null) nse.setToolIndex(tcIndex);
+            nse.setToolArgumentsDelta(funcArgs);
+            events.add(nse);
+        }
+    }
+
+    private CanonicalStreamEvent baseStreamEvent(JsonNode data, String responseId, Integer choiceIndex) {
+        CanonicalStreamEvent nse = new CanonicalStreamEvent();
+        nse.setRaw(data);
+        if (responseId != null) nse.setResponseId(responseId);
+        if (choiceIndex != null) nse.setChoiceIndex(choiceIndex);
+        return nse;
     }
 
     @Override

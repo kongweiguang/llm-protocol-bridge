@@ -249,6 +249,49 @@ class ToolCallConversionTest {
     }
 
     @Test
+    void openAiChatStreamMultipleToolCallsInOneDelta_preservesAllToolCallStarts() {
+        ObjectNode chunk = JacksonUtil.objectNode();
+        chunk.put("id", "chatcmpl-123");
+        chunk.put("object", "chat.completion.chunk");
+        chunk.put("model", "gpt-4");
+        var choices = chunk.putArray("choices");
+        var choice = choices.addObject();
+        choice.put("index", 0);
+        var delta = choice.putObject("delta");
+        var toolCalls = delta.putArray("tool_calls");
+
+        var first = toolCalls.addObject();
+        first.put("index", 0);
+        first.put("id", "call_weather");
+        first.put("type", "function");
+        first.putObject("function").put("name", "get_weather");
+
+        var second = toolCalls.addObject();
+        second.put("index", 1);
+        second.put("id", "call_time");
+        second.put("type", "function");
+        second.putObject("function").put("name", "get_time");
+
+        ProtocolCodec codec = registry.get(ApiProtocol.OPENAI_CHAT_COMPLETIONS);
+        ProtocolCodec.BridgeContext context = new ProtocolCodec.BridgeContext(
+                ApiProtocol.OPENAI_CHAT_COMPLETIONS, ApiProtocol.ANTHROPIC_MESSAGES, "gpt-4");
+
+        StepVerifier.create(codec.normalizeStream(Flux.just(new SseFrame(null, chunk.toString())), context).collectList())
+                .assertNext(events -> {
+                    assertThat(events).hasSize(2);
+                    assertThat(events.get(0).getType()).isEqualTo(CanonicalStreamEventType.TOOL_CALL_START);
+                    assertThat(events.get(0).getToolIndex()).isEqualTo(0);
+                    assertThat(events.get(0).getToolCallId()).isEqualTo("call_weather");
+                    assertThat(events.get(0).getToolName()).isEqualTo("get_weather");
+                    assertThat(events.get(1).getType()).isEqualTo(CanonicalStreamEventType.TOOL_CALL_START);
+                    assertThat(events.get(1).getToolIndex()).isEqualTo(1);
+                    assertThat(events.get(1).getToolCallId()).isEqualTo("call_time");
+                    assertThat(events.get(1).getToolName()).isEqualTo("get_time");
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void multipleToolCalls_orderPreserved() {
         ObjectNode request = JacksonUtil.objectNode();
         request.put("model", "gpt-4");
