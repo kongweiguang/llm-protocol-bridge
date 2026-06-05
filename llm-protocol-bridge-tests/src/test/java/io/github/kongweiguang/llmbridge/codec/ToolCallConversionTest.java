@@ -293,6 +293,46 @@ class ToolCallConversionTest {
     }
 
     @Test
+    void streamText_toResponses_reusesMessageItemIdForContentEvents() {
+        Flux<CanonicalStreamEvent> events = Flux.just(
+                new CanonicalStreamEvent(CanonicalStreamEventType.MESSAGE_START),
+                new CanonicalStreamEvent(CanonicalStreamEventType.CONTENT_BLOCK_START) {{
+                    setContentIndex(0);
+                }},
+                new CanonicalStreamEvent(CanonicalStreamEventType.TEXT_DELTA) {{
+                    setDeltaText("hello");
+                    setContentIndex(0);
+                }}
+        );
+
+        ProtocolCodec codec = registry.get(ApiProtocol.OPENAI_RESPONSES);
+        ProtocolCodec.BridgeContext context = new ProtocolCodec.BridgeContext(
+                ApiProtocol.OPENAI_CHAT_COMPLETIONS, ApiProtocol.OPENAI_RESPONSES, "gpt-4");
+
+        StepVerifier.create(codec.denormalizeStream(events, context).collectList())
+                .assertNext(eventList -> {
+                    SseFrame messageStart = eventList.stream()
+                            .filter(e -> "response.output_item.added".equals(e.getEvent()))
+                            .findFirst().orElse(null);
+                    SseFrame contentStart = eventList.stream()
+                            .filter(e -> "response.content_part.added".equals(e.getEvent()))
+                            .findFirst().orElse(null);
+                    SseFrame textDelta = eventList.stream()
+                            .filter(e -> "response.output_text.delta".equals(e.getEvent()))
+                            .findFirst().orElse(null);
+
+                    assertThat(messageStart).isNotNull();
+                    assertThat(contentStart).isNotNull();
+                    assertThat(textDelta).isNotNull();
+
+                    String itemId = JacksonUtil.tryParse(messageStart.getData()).get("item").get("id").asText();
+                    assertThat(JacksonUtil.tryParse(contentStart.getData()).get("item_id").asText()).isEqualTo(itemId);
+                    assertThat(JacksonUtil.tryParse(textDelta.getData()).get("item_id").asText()).isEqualTo(itemId);
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void openAiChatStreamMultipleToolCallsInOneDelta_preservesAllToolCallStarts() {
         ObjectNode chunk = JacksonUtil.objectNode();
         chunk.put("id", "chatcmpl-123");

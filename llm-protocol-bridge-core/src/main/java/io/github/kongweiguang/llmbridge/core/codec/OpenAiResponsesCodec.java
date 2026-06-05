@@ -1022,6 +1022,7 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
     @Override
     public Flux<SseFrame> denormalizeStream(Flux<CanonicalStreamEvent> events, BridgeContext context) {
         StreamStateTracker state = new StreamStateTracker();
+        Map<Integer, String> messageItemIds = new HashMap<>();
         Map<Integer, String> toolItemIds = new HashMap<>();
         state.setCreated(System.currentTimeMillis() / 1000);
         state.setModel(context.requestedModel());
@@ -1046,11 +1047,14 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
                     result.add(new SseFrame("response.created", root.toString()));
                 }
                 case MESSAGE_START -> {
+                    int outputIndex = 0;
+                    String itemId = "msg_" + UUID.randomUUID();
+                    messageItemIds.put(outputIndex, itemId);
                     ObjectNode root = JacksonUtil.objectNode();
                     root.put("type", "response.output_item.added");
-                    root.put("output_index", 0);
+                    root.put("output_index", outputIndex);
                     ObjectNode item = root.putObject("item");
-                    item.put("id", "msg_" + UUID.randomUUID());
+                    item.put("id", itemId);
                     item.put("type", "message");
                     item.put("status", "in_progress");
                     item.put("role", "assistant");
@@ -1058,10 +1062,11 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
                     result.add(new SseFrame("response.output_item.added", root.toString()));
                 }
                 case CONTENT_BLOCK_START -> {
+                    int outputIndex = 0;
                     ObjectNode root = JacksonUtil.objectNode();
                     root.put("type", "response.content_part.added");
-                    root.put("item_id", "msg_" + UUID.randomUUID());
-                    root.put("output_index", 0);
+                    root.put("item_id", messageItemIds.computeIfAbsent(outputIndex, ignored -> "msg_" + UUID.randomUUID()));
+                    root.put("output_index", outputIndex);
                     root.put("content_index", event.getContentIndex() != null ? event.getContentIndex() : 0);
                     ObjectNode part = root.putObject("part");
                     part.put("type", "output_text");
@@ -1069,10 +1074,11 @@ public class OpenAiResponsesCodec implements ProtocolCodec {
                     result.add(new SseFrame("response.content_part.added", root.toString()));
                 }
                 case TEXT_DELTA -> {
+                    int outputIndex = 0;
                     ObjectNode root = JacksonUtil.objectNode();
                     root.put("type", "response.output_text.delta");
-                    root.put("item_id", "msg_" + UUID.randomUUID());
-                    root.put("output_index", 0);
+                    root.put("item_id", messageItemIds.computeIfAbsent(outputIndex, ignored -> "msg_" + UUID.randomUUID()));
+                    root.put("output_index", outputIndex);
                     root.put("content_index", event.getContentIndex() != null ? event.getContentIndex() : 0);
                     root.put("delta", event.getDeltaText() != null ? event.getDeltaText() : "");
                     result.add(new SseFrame("response.output_text.delta", root.toString()));
