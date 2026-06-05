@@ -126,10 +126,7 @@ public class AnthropicMessagesCodec implements ProtocolCodec {
         JsonNode messagesNode = rawRequest.get("messages");
         if (messagesNode != null && messagesNode.isArray()) {
             for (JsonNode msg : messagesNode) {
-                CanonicalMessage nm = normalizeMessage(msg);
-                if (nm != null) {
-                    messages.add(nm);
-                }
+                messages.addAll(normalizeMessageEntries(msg));
             }
         }
         req.setMessages(messages);
@@ -159,6 +156,47 @@ public class AnthropicMessagesCodec implements ProtocolCodec {
                 "inference_geo", "speed", "context_management"));
 
         return req;
+    }
+
+    private List<CanonicalMessage> normalizeMessageEntries(JsonNode msg) {
+        String role = JacksonUtil.getString(msg, "role");
+        JsonNode contentNode = msg.get("content");
+        if ("user".equals(role) && contentNode != null && contentNode.isArray()) {
+            List<ToolResultContentPart> toolResults = new ArrayList<>();
+            boolean hasNonToolResult = false;
+            for (JsonNode block : contentNode) {
+                CanonicalContentPart part = normalizeContentBlock(block);
+                if (part instanceof ToolResultContentPart trp) {
+                    toolResults.add(trp);
+                } else if (part != null) {
+                    hasNonToolResult = true;
+                }
+            }
+            if (!toolResults.isEmpty() && !hasNonToolResult) {
+                List<CanonicalMessage> messages = new ArrayList<>();
+                for (ToolResultContentPart trp : toolResults) {
+                    messages.add(toToolMessage(trp));
+                }
+                return messages;
+            }
+        }
+        CanonicalMessage nm = normalizeMessage(msg);
+        return nm != null ? List.of(nm) : List.of();
+    }
+
+    private CanonicalMessage toToolMessage(ToolResultContentPart trp) {
+        CanonicalMessage nm = new CanonicalMessage();
+        nm.setRole(CanonicalRole.TOOL);
+        nm.setToolCallId(trp.getToolCallId());
+        if (trp.getContent() != null) {
+            nm.setContent(List.of(new TextContentPart(trp.getContent())));
+        }
+        if (trp.getIsError() != null) {
+            ObjectNode extra = JacksonUtil.objectNode();
+            extra.put("is_error", trp.getIsError());
+            nm.setRawExtra(extra);
+        }
+        return nm;
     }
 
     private CanonicalMessage normalizeMessage(JsonNode msg) {
@@ -201,15 +239,12 @@ public class AnthropicMessagesCodec implements ProtocolCodec {
             }
             if (!toolResults.isEmpty() && parts.isEmpty() && nm.getRole() == CanonicalRole.USER) {
                 ToolResultContentPart trp = toolResults.get(0);
-                nm.setRole(CanonicalRole.TOOL);
-                nm.setToolCallId(trp.getToolCallId());
-                if (trp.getContent() != null) {
-                    parts.add(new TextContentPart(trp.getContent()));
-                }
-                if (trp.getIsError() != null) {
-                    ObjectNode extra = JacksonUtil.objectNode();
-                    extra.put("is_error", trp.getIsError());
-                    nm.setRawExtra(extra);
+                CanonicalMessage toolMessage = toToolMessage(trp);
+                nm.setRole(toolMessage.getRole());
+                nm.setToolCallId(toolMessage.getToolCallId());
+                nm.setRawExtra(toolMessage.getRawExtra());
+                if (toolMessage.getContent() != null) {
+                    parts.addAll(toolMessage.getContent());
                 }
             } else {
                 parts.addAll(toolResults);
@@ -781,72 +816,18 @@ public class AnthropicMessagesCodec implements ProtocolCodec {
         // content blocks
         ArrayNode contentArr = root.putArray("content");
         if (response.getOutputMessages() != null && !response.getOutputMessages().isEmpty()) {
-            CanonicalMessage msg = response.getOutputMessages().get(0);
+            for (CanonicalMessage msg : response.getOutputMessages()) {
+                appendResponseMessageContent(contentArr, msg);
 
-            if (msg.getToolCalls() != null) {
-                for (CanonicalToolCall tc : msg.getToolCalls()) {
-                    ObjectNode toolUseNode = JacksonUtil.objectNode();
-                    toolUseNode.put("type", "tool_use");
-                    toolUseNode.put("id", tc.getId() != null ? tc.getId() : "toolu_" + UUID.randomUUID());
-                    toolUseNode.put("name", tc.getName());
-                    toolUseNode.set("input", tc.getArguments() != null ? tc.getArguments() : JacksonUtil.objectNode());
-                    contentArr.add(toolUseNode);
+                // Merge rawExtra back
+                if (msg.getRawExtra() != null) {
+                    JacksonUtil.deepMergeInto(root, msg.getRawExtra());
                 }
-            }
 
-            if (msg.getContent() != null) {
-                for (CanonicalContentPart part : msg.getContent()) {
-                    if (part instanceof TextContentPart tp) {
-                        ObjectNode textNode = JacksonUtil.objectNode();
-                        textNode.put("type", "text");
-                        textNode.put("text", tp.getText());
-                        contentArr.add(textNode);
-                    } else if (part instanceof ThinkingContentPart thp) {
-                        ObjectNode thinkingNode = JacksonUtil.objectNode();
-                        thinkingNode.put("type", "thinking");
-                        thinkingNode.put("thinking", thp.getThinking());
-                        if (thp.getSignature() != null) {
-                            thinkingNode.put("signature", thp.getSignature());
-                        }
-                        contentArr.add(thinkingNode);
-                    } else if (part instanceof ToolCallContentPart tcp) {
-                        ObjectNode toolUseNode = JacksonUtil.objectNode();
-                        toolUseNode.put("type", "tool_use");
-                        toolUseNode.put("id", tcp.getId() != null ? tcp.getId() : "toolu_" + UUID.randomUUID());
-                        toolUseNode.put("name", tcp.getName());
-                        toolUseNode.set("input", tcp.getArguments() != null ? tcp.getArguments() : JacksonUtil.objectNode());
-                        contentArr.add(toolUseNode);
-                    } else if (part instanceof FileContentPart fp) {
-                        ObjectNode docNode = JacksonUtil.objectNode();
-                        docNode.put("type", "document");
-                        ObjectNode sourceNode = JacksonUtil.objectNode();
-                        if (fp.getBase64() != null) {
-                            sourceNode.put("type", "base64");
-                            sourceNode.put("media_type", fp.getMediaType() != null ? fp.getMediaType() : "application/octet-stream");
-                            sourceNode.put("data", fp.getBase64());
-                        } else if (fp.getUrl() != null) {
-                            sourceNode.put("type", "url");
-                            sourceNode.put("url", fp.getUrl());
-                        }
-                        docNode.set("source", sourceNode);
-                        contentArr.add(docNode);
-                    } else if (part instanceof UnknownContentPart up) {
-                        // Pass through unknown parts
-                        if (up.getRaw() != null) {
-                            contentArr.add(up.getRaw());
-                        }
-                    }
+                // reasoning_content on the assistant message
+                if (msg.getReasoningContent() != null) {
+                    root.put("reasoning_content", msg.getReasoningContent());
                 }
-            }
-
-            // Merge rawExtra back
-            if (msg.getRawExtra() != null) {
-                JacksonUtil.deepMergeInto(root, msg.getRawExtra());
-            }
-
-            // reasoning_content on the assistant message
-            if (msg.getReasoningContent() != null) {
-                root.put("reasoning_content", msg.getReasoningContent());
             }
         }
 
@@ -899,6 +880,64 @@ public class AnthropicMessagesCodec implements ProtocolCodec {
         }
 
         return root;
+    }
+
+    private void appendResponseMessageContent(ArrayNode contentArr, CanonicalMessage msg) {
+        if (msg.getToolCalls() != null) {
+            for (CanonicalToolCall tc : msg.getToolCalls()) {
+                ObjectNode toolUseNode = JacksonUtil.objectNode();
+                toolUseNode.put("type", "tool_use");
+                toolUseNode.put("id", tc.getId() != null ? tc.getId() : "toolu_" + UUID.randomUUID());
+                toolUseNode.put("name", tc.getName());
+                toolUseNode.set("input", tc.getArguments() != null ? tc.getArguments() : JacksonUtil.objectNode());
+                contentArr.add(toolUseNode);
+            }
+        }
+
+        if (msg.getContent() != null) {
+            for (CanonicalContentPart part : msg.getContent()) {
+                if (part instanceof TextContentPart tp) {
+                    ObjectNode textNode = JacksonUtil.objectNode();
+                    textNode.put("type", "text");
+                    textNode.put("text", tp.getText());
+                    contentArr.add(textNode);
+                } else if (part instanceof ThinkingContentPart thp) {
+                    ObjectNode thinkingNode = JacksonUtil.objectNode();
+                    thinkingNode.put("type", "thinking");
+                    thinkingNode.put("thinking", thp.getThinking());
+                    if (thp.getSignature() != null) {
+                        thinkingNode.put("signature", thp.getSignature());
+                    }
+                    contentArr.add(thinkingNode);
+                } else if (part instanceof ToolCallContentPart tcp) {
+                    ObjectNode toolUseNode = JacksonUtil.objectNode();
+                    toolUseNode.put("type", "tool_use");
+                    toolUseNode.put("id", tcp.getId() != null ? tcp.getId() : "toolu_" + UUID.randomUUID());
+                    toolUseNode.put("name", tcp.getName());
+                    toolUseNode.set("input", tcp.getArguments() != null ? tcp.getArguments() : JacksonUtil.objectNode());
+                    contentArr.add(toolUseNode);
+                } else if (part instanceof FileContentPart fp) {
+                    ObjectNode docNode = JacksonUtil.objectNode();
+                    docNode.put("type", "document");
+                    ObjectNode sourceNode = JacksonUtil.objectNode();
+                    if (fp.getBase64() != null) {
+                        sourceNode.put("type", "base64");
+                        sourceNode.put("media_type", fp.getMediaType() != null ? fp.getMediaType() : "application/octet-stream");
+                        sourceNode.put("data", fp.getBase64());
+                    } else if (fp.getUrl() != null) {
+                        sourceNode.put("type", "url");
+                        sourceNode.put("url", fp.getUrl());
+                    }
+                    docNode.set("source", sourceNode);
+                    contentArr.add(docNode);
+                } else if (part instanceof UnknownContentPart up) {
+                    // Pass through unknown parts
+                    if (up.getRaw() != null) {
+                        contentArr.add(up.getRaw());
+                    }
+                }
+            }
+        }
     }
 
     // ===== Streaming methods =====

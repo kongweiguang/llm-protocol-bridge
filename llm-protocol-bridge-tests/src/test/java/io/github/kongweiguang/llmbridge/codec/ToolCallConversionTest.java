@@ -373,6 +373,91 @@ class ToolCallConversionTest {
     }
 
     @Test
+    void anthropicMultipleToolResults_toOpenAiChatSeparateToolMessages() {
+        ObjectNode request = JacksonUtil.objectNode();
+        request.put("model", "claude-sonnet-4-6");
+        request.put("max_tokens", 100);
+
+        var messages = request.putArray("messages");
+        var userMsg = messages.addObject();
+        userMsg.put("role", "user");
+        var userContent = userMsg.putArray("content");
+        var firstResult = userContent.addObject();
+        firstResult.put("type", "tool_result");
+        firstResult.put("tool_use_id", "toolu_weather");
+        firstResult.put("content", "Sunny");
+        var secondResult = userContent.addObject();
+        secondResult.put("type", "tool_result");
+        secondResult.put("tool_use_id", "toolu_time");
+        secondResult.put("content", "10:30");
+
+        ProtocolCodec sourceCodec = registry.get(ApiProtocol.ANTHROPIC_MESSAGES);
+        ProtocolCodec targetCodec = registry.get(ApiProtocol.OPENAI_CHAT_COMPLETIONS);
+        ProtocolCodec.BridgeContext context = new ProtocolCodec.BridgeContext(
+                ApiProtocol.ANTHROPIC_MESSAGES, ApiProtocol.OPENAI_CHAT_COMPLETIONS, "claude-sonnet-4-6");
+
+        CanonicalRequest normalized = sourceCodec.normalizeRequest(request, context);
+        ObjectNode chatRequest = targetCodec.denormalizeRequest(normalized, context);
+
+        assertThat(normalized.getMessages()).hasSize(2);
+        assertThat(normalized.getMessages().get(0).getRole()).isEqualTo(CanonicalRole.TOOL);
+        assertThat(normalized.getMessages().get(0).getToolCallId()).isEqualTo("toolu_weather");
+        assertThat(normalized.getMessages().get(1).getRole()).isEqualTo(CanonicalRole.TOOL);
+        assertThat(normalized.getMessages().get(1).getToolCallId()).isEqualTo("toolu_time");
+
+        JsonNode chatMessages = chatRequest.get("messages");
+        assertThat(chatMessages).hasSize(2);
+        assertThat(chatMessages.get(0).get("role").asText()).isEqualTo("tool");
+        assertThat(chatMessages.get(0).get("tool_call_id").asText()).isEqualTo("toolu_weather");
+        assertThat(chatMessages.get(0).get("content").asText()).isEqualTo("Sunny");
+        assertThat(chatMessages.get(1).get("role").asText()).isEqualTo("tool");
+        assertThat(chatMessages.get(1).get("tool_call_id").asText()).isEqualTo("toolu_time");
+        assertThat(chatMessages.get(1).get("content").asText()).isEqualTo("10:30");
+    }
+
+    @Test
+    void canonicalResponseMultipleOutputMessages_toAnthropicPreservesAllContentBlocks() {
+        CanonicalResponse response = new CanonicalResponse();
+        response.setId("resp_123");
+        response.setModel("claude-sonnet-4-6");
+
+        CanonicalMessage first = new CanonicalMessage();
+        first.setRole(CanonicalRole.ASSISTANT);
+        first.setContent(List.of(new TextContentPart("First part.")));
+
+        CanonicalToolCall tc = new CanonicalToolCall();
+        tc.setId("toolu_123");
+        tc.setName("get_weather");
+        tc.setType("function");
+        ObjectNode args = JacksonUtil.objectNode();
+        args.put("location", "NYC");
+        tc.setArguments(args);
+
+        CanonicalMessage second = new CanonicalMessage();
+        second.setRole(CanonicalRole.ASSISTANT);
+        second.setToolCalls(List.of(tc));
+        second.setContent(List.of(new TextContentPart("Second part.")));
+
+        response.setOutputMessages(List.of(first, second));
+
+        ProtocolCodec codec = registry.get(ApiProtocol.ANTHROPIC_MESSAGES);
+        ProtocolCodec.BridgeContext context = new ProtocolCodec.BridgeContext(
+                ApiProtocol.OPENAI_CHAT_COMPLETIONS, ApiProtocol.ANTHROPIC_MESSAGES, "claude-sonnet-4-6");
+
+        ObjectNode anthropicResponse = codec.denormalizeResponse(response, context);
+        JsonNode content = anthropicResponse.get("content");
+
+        assertThat(content).hasSize(3);
+        assertThat(content.get(0).get("type").asText()).isEqualTo("text");
+        assertThat(content.get(0).get("text").asText()).isEqualTo("First part.");
+        assertThat(content.get(1).get("type").asText()).isEqualTo("tool_use");
+        assertThat(content.get(1).get("id").asText()).isEqualTo("toolu_123");
+        assertThat(content.get(1).get("name").asText()).isEqualTo("get_weather");
+        assertThat(content.get(2).get("type").asText()).isEqualTo("text");
+        assertThat(content.get(2).get("text").asText()).isEqualTo("Second part.");
+    }
+
+    @Test
     void structuredToolChoice_mapsBetweenOpenAiAndAnthropicShapes() {
         ObjectNode request = JacksonUtil.objectNode();
         request.put("model", "gpt-4");
