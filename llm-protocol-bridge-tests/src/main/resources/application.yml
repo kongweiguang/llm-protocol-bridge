@@ -66,6 +66,16 @@ llm:
         request-defaults:
           ignore_invalid_history: true
 
+      opencode-zen-free:
+        kind: openai-chat-compatible
+        endpoint:
+          base-url: https://opencode.ai/zen/v1
+        authentication:
+          type: bearer-token
+          token: ${OPENCODE_API_KEY:public}
+        default-headers:
+          x-opencode-client: llm-protocol-bridge
+
     model-aliases:
       gpt-main:
         provider-ref: openai-primary
@@ -83,7 +93,29 @@ llm:
         provider-ref: mimo-primary
         upstream-model: mimo-v2.5-pro
 
+      opencode-big-pickle:
+        provider-ref: opencode-zen-free
+        upstream-model: big-pickle
+
+      opencode-deepseek-free:
+        provider-ref: opencode-zen-free
+        upstream-model: deepseek-v4-flash-free
+
+      opencode-nemotron-free:
+        provider-ref: opencode-zen-free
+        upstream-model: nemotron-3-super-free
+
     routes:
+      opencode-free:
+        strategy: failover
+        candidates:
+          - model-ref: opencode-big-pickle
+            weight: 40
+          - model-ref: opencode-deepseek-free
+            weight: 30
+          - model-ref: opencode-nemotron-free
+            weight: 30
+
       coding:
         strategy: failover
         candidates:
