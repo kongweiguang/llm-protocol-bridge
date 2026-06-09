@@ -6,7 +6,7 @@
 
     <groupId>io.github.kongweiguang</groupId>
     <artifactId>llm-protocol-bridge</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1</version>
     <packaging>pom</packaging>
     <name>llm-protocol-bridge</name>
     <description>LLM Protocol Bridge - Spring Boot Starter for bridging OpenAI and Anthropic LLM APIs</description>
